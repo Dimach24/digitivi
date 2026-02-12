@@ -111,9 +111,9 @@ int main() {
         return -1;
 
     const auto hist = getHist(image);
-    const auto downsampled = downsample(image, 4);
-    const auto quantised = quantise(image, 4);
-    const auto histQuantised = getHist(quantised);
+    auto downsampled = downsample(image, 4);
+    auto quantised = quantise(image, 4);
+    auto histQuantised = getHist(quantised);
 
     cv::imshow("Original", image);
     cv::imshow("Downsampled", downsampled);
@@ -122,18 +122,22 @@ int main() {
     cv::imshow("HistogramQuantised", histQuantised);
 
     std::cout << "Original RMS:\n\t" << Math::rms(image) << std::endl;
-    for (size_t steps = 2; steps <= 64; steps *= 2) {
+    for (size_t steps = 2; steps <= 64; steps <<= 1) {
         auto tmp = quantise(image, steps);
         std::cout << "========== " << steps << " ==========" << std::endl;
         std::cout << "Theoretical: " << static_cast<double>(UINT8_MAX / (steps - 1)) / sqrt(12.) <<
                 std::endl << "Actual:      " << Math::std(image, tmp) << std::endl;
+        auto tmpHist = getHist(tmp);
+        cv::imwrite("quantised_in_" + std::to_string(steps) + "_steps.png", tmp);
+        cv::imwrite("quantised_in_" + std::to_string(steps) + "_steps_hist.png", tmpHist);
     }
 
-    size_t i = 0;
-    for (auto &img: {image, hist, downsampled, quantised, histQuantised}) {
-        cv::imwrite(std::to_string(i++) + ".png", img);
+    for (auto &dsq: {4, 8}) {
+        downsampled = downsample(image, dsq);
+        cv::imwrite("downsampled_" + std::to_string(dsq) + "_times.png", downsampled);
     }
+    cv::imwrite("orig.png", image);
+    cv::imwrite("origHist.png", hist);
     cv::waitKey(0);
-
     return 0;
 }
