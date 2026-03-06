@@ -14,7 +14,8 @@ struct UserData {
 cv::Mat addGrid(const cv::Mat &input, int blockSize);
 void onMouse(int event, int x, int y, int flags, void *userData);
 cv::Mat dctBasis(int blockSize);
-
+cv::Mat transform(const cv::Mat &input);
+void showScaled(const cv::Mat &toShow, std::string winName, int totalHeight = 256);
 int main() {
     std::cout << "Starting application with OpenCV ver: " << CV_VERSION << "\n";
 
@@ -59,15 +60,14 @@ void onMouse(int event, int x, int y, int flags, void *userData) {
     if (event == cv::EVENT_LBUTTONDOWN) {
         int i = y / data.blockSize * data.blockSize;
         int j = x / data.blockSize * data.blockSize;
-        if (i + data.blockSize - 1 <= data.picture.rows ||
-            j + data.blockSize - 1 <= data.picture.cols) {
-            return; // За сеткой
-        }
         auto gridCopy = data.pictureWithGrid.clone();
         auto blockRect = cv::Rect{j, i, data.blockSize, data.blockSize};
         cv::rectangle(gridCopy, blockRect, cv::Scalar{255, 0, 255}, 2);
         imshow(data.winName, gridCopy);
         auto block = data.picture(blockRect);
+        showScaled(block, "Block");
+        auto DFT = transform(block);
+        showScaled(DFT, "DFT");
     }
 }
 
@@ -80,4 +80,25 @@ cv::Mat dctBasis(int blockSize) {
         }
     }
     return basisMat;
+}
+cv::Mat transform(const cv::Mat &input) {
+    assert(input.channels() == 1);
+    assert(input.rows == input.cols);
+    cv::Mat U;
+    if (input.type() != CV_64F) {
+        input.convertTo(U, CV_64F);
+    } else {
+        U = input.clone();
+    }
+    auto N = input.rows;
+    auto phi = dctBasis(N);
+    return phi * U * phi.t();
+}
+void showScaled(const cv::Mat &toShow, std::string winName, int totalHeight) {
+    auto rows = toShow.rows;
+    auto scale = totalHeight / rows;
+    cv::Mat vis;
+    toShow.convertTo(vis, CV_8U);
+    cv::resize(vis, vis, cv::Size(), scale, scale, cv::INTER_NEAREST);
+    cv::imshow(winName, vis);
 }
