@@ -60,6 +60,9 @@ void onMouse(int event, int x, int y, int flags, void *userData) {
     if (event == cv::EVENT_LBUTTONDOWN) {
         int i = y / data.blockSize * data.blockSize;
         int j = x / data.blockSize * data.blockSize;
+        if (i + data.blockSize >= data.picture.rows || j + data.blockSize >= data.picture.cols) {
+            return;
+        }
         auto gridCopy = data.pictureWithGrid.clone();
         auto blockRect = cv::Rect{j, i, data.blockSize, data.blockSize};
         cv::rectangle(gridCopy, blockRect, cv::Scalar{255, 0, 255}, 2);
