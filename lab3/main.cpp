@@ -32,20 +32,27 @@ int main() {
     const size_t scale = image.cols / optimalWidth;
     cv::resize(image, image, cv::Size(image.cols / scale, image.rows / scale));
 
-    cv::Mat result = image.clone();
 
     cv::imshow("Source", image);
     cv::imwrite("source.png", image);
 
     Mask mask = gaussFilter(3, 1);
-    filter(image, result, mask);
-    cv::imshow("Gauss 3", result);
-    cv::imwrite("gauss-3x3-1.png", result);
+    cv::Mat gauss3;
+    filter(image, gauss3, mask);
+    cv::imshow("Gauss 3", gauss3);
+    cv::imwrite("gauss-3x3-1.png", gauss3);
 
+    cv::Mat gauss7;
     mask = gaussFilter(7, 2);
-    filter(image, result, mask);
-    cv::imshow("Gauss 7", result);
-    cv::imwrite("gauss-7x7-2.png", result);
+    filter(image, gauss7, mask);
+    cv::imshow("Gauss 7", gauss7);
+    cv::imwrite("gauss-7x7-2.png", gauss7);
+
+    cv::Mat result;
+    cv::absdiff(gauss7, gauss3, result);
+    cv::normalize(result, result, 0, 255, cv::NORM_MINMAX, CV_8U);
+    cv::imshow("Gauss diff", result);
+    cv::imwrite("gauss-diff.png", result);
 
     result = mosaicFilter(image, 5);
     cv::imshow("Mosaic", result);
