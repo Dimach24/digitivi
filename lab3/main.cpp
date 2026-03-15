@@ -33,13 +33,15 @@ int main() {
     cv::resize(image, image, cv::Size(image.cols / scale, image.rows / scale));
 
     cv::Mat result = image.clone();
+
+    cv::imshow("Source", image);
+    cv::imwrite("source.png", image);
+
     Mask mask = gaussFilter(3, 1);
     filter(image, result, mask);
-    cv::imshow("Source", image);
-    cv::imwrite("source.png", result);
-
     cv::imshow("Gauss 3", result);
     cv::imwrite("gauss-3x3-1.png", result);
+
     mask = gaussFilter(7, 2);
     filter(image, result, mask);
     cv::imshow("Gauss 7", result);
