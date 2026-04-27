@@ -10,7 +10,7 @@ msr(const cv::Mat &img, float sigma0, const std::vector<float> &scales, std::vec
 void saveDataForReport(const cv::Mat &image, const std::string &tag);
 
 int main() {
-    cv::Mat image = cv::imread(R"(resources/mordor.png)", 0);
+    cv::Mat image = cv::imread(R"(resources/evening.jpg)", 0);
     if (image.empty())
         return -1;
     cv::Mat hist;
@@ -47,7 +47,7 @@ int main() {
 
     {
         auto constexpr c = 1.f;
-        auto constexpr gamma = .75f;
+        auto constexpr gamma = .45f;
         lut = buildLut([](const float &x) { return c * cv::pow(x, gamma); });
         cv::Mat gammaCorr;
         cv::LUT(image, lut, gammaCorr);
@@ -59,8 +59,8 @@ int main() {
     }
 
     {
-        auto constexpr c = 1.5f;
-        lut = buildLut([](const float &x) { return c * cv::log(1 + x); });
+        float const c = 1.f / cv::log(2.f);
+        lut = buildLut([c](const float &x) { return c * cv::log(1 + x); });
         cv::Mat logCorr;
         cv::LUT(image, lut, logCorr);
 
@@ -160,10 +160,32 @@ msr(const cv::Mat &img,
         aperture = aperture / 2 * 2 + 1;
         sum += weights[i] * ssr(src, sigma, aperture);
     }
-    sum *= 255;
-    cv::Mat result;
-    sum.convertTo(result, CV_8U);
-    return result;
+    cv::Mat result = img.clone();
+    double minVal, maxVal;
+
+    // Сортируем все значения sum для поиска процентилей
+    cv::Mat flat = sum.reshape(1, 1); // превращаем в 1D
+    cv::Mat sorted;
+    cv::sort(flat, sorted, cv::SORT_EVERY_ROW + cv::SORT_ASCENDING);
+
+    int total = sorted.cols;
+    int p1_idx = static_cast<int>(0.01 * total); // 1-й процентиль
+    int p99_idx = static_cast<int>(0.99 * total); // 99-й процентиль
+
+    double low = sorted.at<float>(p1_idx);
+    double high = sorted.at<float>(p99_idx);
+
+    if (high <= low) {
+        high = low + 1e-6;
+    }
+
+    // Normalize с отсечением выбросов
+    cv::Mat normalized;
+    sum = (sum - low) / (high - low) * 255;
+    cv::Mat result8u;
+    sum.convertTo(result8u, CV_8U);
+
+    return result8u;
 };
 void saveDataForReport(const cv::Mat &image, const std::string &tag) {
     cv::Scalar mean, stdDev;
