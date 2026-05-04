@@ -76,6 +76,10 @@ int main() {
         showAndSave("Eroded (bin) " + name, processed);
         dilatation(bin, processed, mask);
         showAndSave("Dilated (bin) " + name, processed);
+        opening(bin, processed, mask);
+        showAndSave("Opened (bin) " + name, processed);
+        closing(bin, processed, mask);
+        showAndSave("Closed (bin) " + name, processed);
     }
 
 
@@ -103,11 +107,22 @@ int main() {
         dilatation(processed, dilated2, square3);
         erosion(image, processed, square3);
         erosion(image, eroded2, square3);
-        showAndSave("Contours L-2*eroded", image - eroded2);
-        showAndSave("Contours 2*dilated-L", dilated2 - image);
-        showAndSave("Contours 2*dilated-2*eroded", dilated2 - eroded2);
+        showAndSave("Contours L-2eroded", image - eroded2);
+        showAndSave("Contours 2dilated-L", dilated2 - image);
+        showAndSave("Contours 2dilated-2eroded", dilated2 - eroded2);
         msmg(image, processed, {square3, square5, square7});
         showAndSave("Multi-Scale Morphological Gradient", processed);
+    }
+    {
+        cv::Mat eroded2 = cv::Mat::zeros(image.size(), CV_8U);
+        cv::Mat dilated2 = cv::Mat::zeros(image.size(), CV_8U);
+        dilatation(image, processed, cross3);
+        dilatation(processed, dilated2, cross3);
+        erosion(image, processed, cross3);
+        erosion(image, eroded2, cross3);
+        showAndSave("Contours L-2eroded cross", image - eroded2);
+        showAndSave("Contours 2dilated-L cross", dilated2 - image);
+        showAndSave("Contours 2dilated-2eroded cross", dilated2 - eroded2);
     }
 
     cv::waitKey();
