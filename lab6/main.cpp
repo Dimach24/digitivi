@@ -4,6 +4,177 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
 
+union RleElement {
+    struct {
+        uchar run = 0;
+        char value = 0;
+    } ac;
+    char dc;
+
+    explicit RleElement(char value) : dc(value) {
+    }
+    explicit RleElement(uchar run, char value) : ac{run, value} {
+    }
+    bool EOB() const {
+        return ac.run == 0 && ac.value == 0;
+    }
+};
+
+
+// utils
+cv::Mat getHist(const cv::Mat &image);
+void showAndSave(const std::string &name, const cv::Mat &image);
+
+// entropy calculation
+double entropyByProbs(const std::vector<double> &probabilities);
+double imageEntropy(const std::vector<uchar> &pixels);
+
+// JPEG operations
+cv::Mat shift(const cv::Mat &image);
+cv::Mat unshift(const cv::Mat &image);
+cv::Mat dctBasis(int blockSize);
+cv::Mat transform(const cv::Mat &input);
+cv::Mat transformImage(const cv::Mat &image, int blockSize);
+cv::Mat reverseTransform(const cv::Mat &input);
+cv::Mat reverseTransformImage(const cv::Mat &image, int blockSize);
+cv::Mat tableByQuality(uchar quality);
+cv::Mat quantiseBlock(const cv::Mat &input, const cv::Mat &table);
+cv::Mat quantise(const cv::Mat &image, int blockSize, int quality);
+cv::Mat dequantiseBlock(const cv::Mat &input, const cv::Mat &table);
+cv::Mat dequantise(const cv::Mat &quantised, int blockSize, int quality);
+std::vector<std::pair<int, int>> zigzagOrder(int blockSize);
+std::vector<char> zigZagRead(const cv::Mat &coefs, int blockSize);
+cv::Mat zigZagWrite(const std::vector<char> &zigZag, int blockSize, int iw, int ih);
+std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, int blockSize);
+std::pair<std::vector<char>, size_t>
+runLengthDecoding(const std::vector<RleElement> &encoded, int blockSize);
+
+
+const std::filesystem::path outPath(std::filesystem::current_path() / "out");
+int main() {
+    constexpr int blockSize = 8;
+    // блок с лестницей
+    const cv::Rect demoRect{320, 168, blockSize, blockSize};
+
+    if (!std::filesystem::exists(outPath)) {
+        std::filesystem::create_directory(outPath);
+    }
+    std::ofstream out((outPath / "out.txt").c_str(), std::ios::out);
+    const cv::Mat image = cv::imread(R"(resources/mordor.png)", 0);
+    const auto iw = image.cols / blockSize * blockSize, ih = image.rows / blockSize * blockSize;
+
+    cv::Rect cropRect(0, 0, iw, ih);
+    cv::Mat source(ih, iw, CV_8U);
+
+    image(cropRect).copyTo(source);
+
+    if (source.empty())
+        return EXIT_FAILURE;
+
+    const cv::Mat histSource = getHist(source);
+
+    const size_t pxCount = iw * ih;
+
+    constexpr double H0{8.};
+    // расчёты H, R
+    {
+        std::vector<uchar> pixels(source.data, source.data + pxCount);
+        double H = imageEntropy(pixels);
+        double R = 1 - H / H0;
+        out << "=== SOURCE ===" << std::endl //
+            << "H: " << H << std::endl       //
+            << "H0: " << H0 << std::endl     //
+            << "R: " << R << std::endl;
+    }
+    showAndSave("Source", source);
+    showAndSave("Hist Source", histSource);
+    for (auto quality: {1, 5, 25}) {
+        {
+            out << "=== Q-TABLE (q = " << quality << ") ===" << std::endl;
+            auto table = tableByQuality(quality);
+            for (int i = 0; i < table.rows; ++i) {
+                for (int j = 0; j < table.cols; ++j) {
+                    out << static_cast<int>(table.at<uchar>(i, j)) << '\t';
+                }
+                out << std::endl;
+            }
+        }
+        const auto shifted = shift(source);                            // signed char
+        const auto dctCoefs = transformImage(shifted, blockSize);      // double
+        const auto quantised = quantise(dctCoefs, blockSize, quality); // signed char
+        const auto coefsHist = getHist(quantised);
+        {
+            std::vector<uchar> pixels(quantised.data, quantised.data + pxCount);
+            double H = imageEntropy(pixels);
+            double R = 1 - H / H0;
+            out << "=== QUANTISED DCT (q = " << quality << ") ===" << std::endl //
+                << "H: " << H << std::endl                                      //
+                << "H0: " << H0 << std::endl                                    //
+                << "R: " << R << std::endl                                      //
+                << "Demo:" << std::endl;
+            auto demo = quantised(demoRect);
+            for (int i = 0; i < demo.rows; ++i) {
+                for (int j = 0; j < demo.cols; ++j) {
+                    out << static_cast<int>(demo.at<uchar>(i, j)) << '\t';
+                }
+                out << std::endl;
+            }
+        }
+        std::vector<char> zigZagSource = zigZagRead(quantised, blockSize);
+        std::vector<RleElement> rle = runLengthEncoding(zigZagSource, blockSize);
+        const auto [zigZagRecovered, bitsNum] = runLengthDecoding(rle, blockSize);
+        {
+            auto zz = zigZagRead(quantised(demoRect), blockSize);
+            out << "=== ZIG-ZAG DCT (q = " << quality << ") ===" << std::endl; //
+            for (int i = 0; i < zz.size(); ++i) {
+                out << static_cast<int>(zz[i]) << (i + 1 == zz.size() ? '\n' : ' ');
+            }
+
+            out << "=== RLE STREAM (q = " << quality << ") ===" << std::endl //
+                << "Length: " << bitsNum << std::endl                        //
+                << "Raw: " << 8 * pxCount << std::endl                       //
+                << "K: " << 8 * static_cast<double>(pxCount) / static_cast<double>(bitsNum)
+                << std::endl //
+                << "Demo:" << std::endl;
+            auto demo = runLengthEncoding(zz, blockSize);
+            for (int i = 0; i < demo.size(); ++i) {
+                out << '(' //
+                    << static_cast<int>(demo[i].ac.run) << ", "
+                    << static_cast<int>(demo[i].ac.value) << ')'
+                    << (i + 1 == demo.size() ? '\n' : ' ');
+            }
+        }
+        const auto dctCoefsRecovered =
+                zigZagWrite(zigZagRecovered, blockSize, iw, ih);                     // signed char
+        const auto dequantised = dequantise(dctCoefsRecovered, blockSize, quality);  // double
+        const auto shiftedRecovered = reverseTransformImage(dequantised, blockSize); // signed char
+        const auto recovered = unshift(shiftedRecovered); // unsigned char
+
+        const cv::Mat histRecovered = getHist(recovered);
+
+
+        showAndSave("Hist DCT_" + std::to_string(quality) + "q", coefsHist);
+        showAndSave("Recovered_" + std::to_string(quality) + "q", recovered);
+        showAndSave("Hist Recovered_" + std::to_string(quality) + "q", histRecovered);
+        {
+            cv::Mat imDiff;
+            source.convertTo(imDiff, CV_64F);
+            imDiff -= recovered;
+            cv::Mat imDiff2;
+            cv::pow(imDiff, 2, imDiff2);
+            auto mse = cv::sum(imDiff2)[0] / static_cast<double>(pxCount);
+            auto psnr = 10 * std::log10(255 * 255 / mse);
+            out << "=== RECOVERED (q = " << quality << ") ===" << std::endl //
+                << "MSE: " << mse << std::endl                              //
+                << "PSNR: " << psnr << std::endl;
+        }
+    }
+
+
+    cv::waitKey();
+    return EXIT_SUCCESS;
+}
+
 cv::Mat getHist(const cv::Mat &image) {
     cv::Mat hist = cv::Mat::zeros(1, 256, CV_64FC1);
     if (image.type() == CV_8U) {
@@ -35,6 +206,14 @@ cv::Mat getHist(const cv::Mat &image) {
         }
     cv::bitwise_not(hist_img, hist_img);
     return hist_img;
+}
+void showAndSave(const std::string &name, const cv::Mat &image) {
+    static const std::filesystem::path outPath{std::filesystem::current_path() / "out"};
+    if (!std::filesystem::exists(outPath)) {
+        std::filesystem::create_directory(outPath);
+    }
+    cv::imshow(name, image);
+    cv::imwrite((outPath / (name + ".png")).string(), image);
 }
 
 double entropyByProbs(const std::vector<double> &probabilities) {
@@ -80,7 +259,6 @@ cv::Mat unshift(const cv::Mat &image) {
     return unshifted;
 }
 
-// Из 2 работы
 cv::Mat dctBasis(int blockSize) {
     cv::Mat basisMat = cv::Mat::zeros(blockSize, blockSize, CV_64F) + 1 / std::sqrt(blockSize);
     const double sqrt2 = std::sqrt(2.);
@@ -277,26 +455,7 @@ cv::Mat zigZagWrite(const std::vector<char> &zigZag, int blockSize, int iw, int 
     return result;
 }
 
-const std::filesystem::path outPath(std::filesystem::current_path() / "out");
-
-
-union RleElement {
-    struct {
-        uchar run = 0;
-        char value = 0;
-    } ac;
-    char dc;
-
-    explicit RleElement(char value) : dc(value) {
-    }
-    explicit RleElement(uchar run, char value) : ac{run, value} {
-    }
-    bool EOB() const {
-        return ac.run == 0 && ac.value == 0;
-    }
-};
-
-std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, const int blockSize) {
+std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, int blockSize) {
     std::vector<RleElement> rleEncoded;
     char lastDc = 0;
     uchar counter = 0;
@@ -324,7 +483,7 @@ std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, con
     return rleEncoded;
 }
 std::pair<std::vector<char>, size_t>
-runLengthDecoding(const std::vector<RleElement> &encoded, const int blockSize) {
+runLengthDecoding(const std::vector<RleElement> &encoded, int blockSize) {
     std::vector<char> decoded;
     size_t bitLength = 0;
     int lastDc = 0;
@@ -352,144 +511,4 @@ runLengthDecoding(const std::vector<RleElement> &encoded, const int blockSize) {
         bitLength += 14;
     }
     return {decoded, bitLength};
-}
-
-void showAndSave(const std::string &name, const cv::Mat &image) {
-    static const std::filesystem::path outPath{std::filesystem::current_path() / "out"};
-    if (!std::filesystem::exists(outPath)) {
-        std::filesystem::create_directory(outPath);
-    }
-    cv::imshow(name, image);
-    cv::imwrite((outPath / (name + ".png")).string(), image);
-}
-
-/*
- *  1. Обрезка:     uchar -> uchar
- *  2. Сдвиг:       uchar -> char
- *  3. ДКП:         char -> double
- *  4. Квантование: double -> char
- */
-
-int main() {
-    constexpr int blockSize = 8;
-    // блок с лестницей
-    const cv::Rect demoRect{320, 168, blockSize, blockSize};
-
-    if (!std::filesystem::exists(outPath)) {
-        std::filesystem::create_directory(outPath);
-    }
-    std::ofstream out((outPath / "out.txt").c_str(), std::ios::out);
-    const cv::Mat image = cv::imread(R"(resources/mordor.png)", 0);
-    const auto iw = image.cols / blockSize * blockSize, ih = image.rows / blockSize * blockSize;
-
-    cv::Rect cropRect(0, 0, iw, ih);
-    cv::Mat source(ih, iw, CV_8U);
-
-    image(cropRect).copyTo(source);
-
-    if (source.empty())
-        return EXIT_FAILURE;
-
-    const cv::Mat histSource = getHist(source);
-
-    const size_t pxCount = iw * ih;
-
-    constexpr double H0{8.};
-    // расчёты H, R
-    {
-        std::vector<uchar> pixels(source.data, source.data + pxCount);
-        double H = imageEntropy(pixels);
-        double R = 1 - H / H0;
-        out << "=== SOURCE ===" << std::endl //
-            << "H: " << H << std::endl       //
-            << "H0: " << H0 << std::endl     //
-            << "R: " << R << std::endl;
-    }
-    showAndSave("Source", source);
-    showAndSave("Hist Source", histSource);
-    for (auto quality: {1, 5, 25}) {
-        {
-            out << "=== Q-TABLE (q = " << quality << ") ===" << std::endl;
-            auto table = tableByQuality(quality);
-            for (int i = 0; i < table.rows; ++i) {
-                for (int j = 0; j < table.cols; ++j) {
-                    out << static_cast<int>(table.at<uchar>(i, j)) << '\t';
-                }
-                out << std::endl;
-            }
-        }
-        const auto shifted = shift(source);                            // signed char
-        const auto dctCoefs = transformImage(shifted, blockSize);      // double
-        const auto quantised = quantise(dctCoefs, blockSize, quality); // signed char
-        const auto coefsHist = getHist(quantised);
-        {
-            std::vector<uchar> pixels(quantised.data, quantised.data + pxCount);
-            double H = imageEntropy(pixels);
-            double R = 1 - H / H0;
-            out << "=== QUANTISED DCT (q = " << quality << ") ===" << std::endl //
-                << "H: " << H << std::endl                                      //
-                << "H0: " << H0 << std::endl                                    //
-                << "R: " << R << std::endl                                      //
-                << "Demo:" << std::endl;
-            auto demo = quantised(demoRect);
-            for (int i = 0; i < demo.rows; ++i) {
-                for (int j = 0; j < demo.cols; ++j) {
-                    out << static_cast<int>(demo.at<uchar>(i, j)) << '\t';
-                }
-                out << std::endl;
-            }
-        }
-        std::vector<char> zigZagSource = zigZagRead(quantised, blockSize);
-        std::vector<RleElement> rle = runLengthEncoding(zigZagSource, blockSize);
-        const auto [zigZagRecovered, bitsNum] = runLengthDecoding(rle, blockSize);
-        {
-            auto zz = zigZagRead(quantised(demoRect), blockSize);
-            out << "=== ZIG-ZAG DCT (q = " << quality << ") ===" << std::endl; //
-            for (int i = 0; i < zz.size(); ++i) {
-                out << static_cast<int>(zz[i]) << (i + 1 == zz.size() ? '\n' : ' ');
-            }
-
-            out << "=== RLE STREAM (q = " << quality << ") ===" << std::endl //
-                << "Length: " << bitsNum << std::endl                        //
-                << "Raw: " << 8 * pxCount << std::endl                       //
-                << "K: " << 8 * static_cast<double>(pxCount) / static_cast<double>(bitsNum)
-                << std::endl //
-                << "Demo:" << std::endl;
-            auto demo = runLengthEncoding(zz, blockSize);
-            for (int i = 0; i < demo.size(); ++i) {
-                out << '(' //
-                    << static_cast<int>(demo[i].ac.run) << ", "
-                    << static_cast<int>(demo[i].ac.value) << ')'
-                    << (i + 1 == demo.size() ? '\n' : ' ');
-            }
-        }
-        const auto dctCoefsRecovered =
-                zigZagWrite(zigZagRecovered, blockSize, iw, ih);                     // signed char
-        const auto dequantised = dequantise(dctCoefsRecovered, blockSize, quality);  // double
-        const auto shiftedRecovered = reverseTransformImage(dequantised, blockSize); // signed char
-        const auto recovered = unshift(shiftedRecovered); // unsigned char
-
-        const cv::Mat histRecovered = getHist(recovered);
-
-
-        showAndSave("Hist DCT_" + std::to_string(quality) + "q", coefsHist);
-        showAndSave("Recovered_" + std::to_string(quality) + "q", recovered);
-        showAndSave("Hist Recovered_" + std::to_string(quality) + "q", histRecovered);
-        {
-            cv::Mat imDiff;
-            source.convertTo(imDiff, CV_64F);
-            imDiff -= recovered;
-            cv::Mat imDiff2;
-            cv::pow(imDiff, 2, imDiff2);
-            auto mse = cv::sum(imDiff2)[0] / static_cast<double>(pxCount);
-            auto psnr = 10 * std::log10(255 * 255 / mse);
-            out << "=== RECOVERED (q = " << quality << ") ===" << std::endl //
-                << "MSE: " << mse << std::endl                              //
-                << "PSNR: " << psnr << std::endl;
-        }
-    }
-
-
-    cv::waitKey();
-    return EXIT_SUCCESS;
 }
