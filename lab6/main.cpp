@@ -94,7 +94,7 @@ int main() {
             auto table = tableByQuality(quality);
             for (int i = 0; i < table.rows; ++i) {
                 for (int j = 0; j < table.cols; ++j) {
-                    out << static_cast<int>(table.at<uchar>(i, j)) << '\t';
+                    out << static_cast<int>(table.at<uint16_t>(i, j)) << '\t';
                 }
                 out << std::endl;
             }
@@ -326,10 +326,10 @@ cv::Mat reverseTransformImage(const cv::Mat &image, int blockSize) {
 cv::Mat tableByQuality(uchar quality) {
     assert(quality <= 25);
     assert(quality >= 1);
-    cv::Mat result(8, 8, CV_8U);
+    cv::Mat result(8, 8, CV_16U);
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
-            result.at<uint8_t>(i, j) = 8 + (i + j) * quality;
+            result.at<uint16_t>(i, j) = 8 + (i + j) * quality;
         }
     }
     return result;
@@ -339,12 +339,12 @@ cv::Mat quantiseBlock(const cv::Mat &input, const cv::Mat &table) {
     assert(input.rows == table.rows);
     assert(input.cols == table.cols);
     assert(input.type() == CV_64F);
-    assert(table.type() == CV_8U);
+    assert(table.type() == CV_16U);
     cv::Mat result(input.rows, input.cols, CV_8S);
     for (int i = 0; i < input.rows; i++) {
         for (int j = 0; j < input.cols; j++) {
             result.at<char>(i, j) =
-                    cv::saturate_cast<char>(input.at<double>(i, j) / table.at<uchar>(i, j));
+                    cv::saturate_cast<char>(input.at<double>(i, j) / table.at<uint16_t>(i, j));
         }
     }
     return result;
@@ -370,12 +370,12 @@ cv::Mat dequantiseBlock(const cv::Mat &input, const cv::Mat &table) {
     assert(input.rows == table.rows);
     assert(input.cols == table.cols);
     assert(input.type() == CV_8S);
-    assert(table.type() == CV_8U);
+    assert(table.type() == CV_16U);
     cv::Mat result(input.rows, input.cols, CV_64F);
     for (int i = 0; i < input.rows; i++) {
         for (int j = 0; j < input.cols; j++) {
             result.at<double>(i, j) =
-                    static_cast<double>(input.at<char>(i, j)) * table.at<uchar>(i, j);
+                    static_cast<double>(input.at<char>(i, j)) * table.at<uint16_t>(i, j);
         }
     }
     return result;
