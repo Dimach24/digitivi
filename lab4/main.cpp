@@ -10,7 +10,7 @@ msr(const cv::Mat &img, float sigma0, const std::vector<float> &scales, std::vec
 void saveDataForReport(const cv::Mat &image, const std::string &tag);
 
 int main() {
-    cv::Mat image = cv::imread(R"(resources/evening.jpg)", 0);
+    cv::Mat image = cv::imread(R"(resources/spb.jfif)", 0);
     if (image.empty())
         return -1;
     cv::Mat hist;
@@ -48,7 +48,7 @@ int main() {
     {
         auto constexpr c = 1.f;
         auto constexpr gamma = .45f;
-        lut = buildLut([](const float &x) { return c * cv::pow(x, gamma); });
+        lut = buildLut([&](const float &x) { return c * cv::pow(x, gamma); });
         cv::Mat gammaCorr;
         cv::LUT(image, lut, gammaCorr);
 
@@ -169,7 +169,7 @@ msr(const cv::Mat &img,
     cv::sort(flat, sorted, cv::SORT_EVERY_ROW + cv::SORT_ASCENDING);
 
     int total = sorted.cols;
-    int p1_idx = static_cast<int>(0.01 * total); // 1-й процентиль
+    int p1_idx = static_cast<int>(0.01 * total);  // 1-й процентиль
     int p99_idx = static_cast<int>(0.99 * total); // 99-й процентиль
 
     double low = sorted.at<float>(p1_idx);
