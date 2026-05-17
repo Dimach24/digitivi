@@ -6,14 +6,15 @@
 
 union RleElement {
     struct {
-        uchar run = 0;
-        char value = 0;
+        uint8_t run = 0;
+        int8_t value = 0;
     } ac;
-    char dc;
+    int8_t dc;
 
-    explicit RleElement(char value) : dc(value) {
+    explicit RleElement(int8_t value) : dc(value) {
+        ac.value = value;
     }
-    explicit RleElement(uchar run, char value) : ac{run, value} {
+    explicit RleElement(uint8_t run, int8_t value) : ac{run, value} {
     }
     bool EOB() const {
         return ac.run == 0 && ac.value == 0;
@@ -27,7 +28,7 @@ void showAndSave(const std::string &name, const cv::Mat &image);
 
 // entropy calculation
 double entropyByProbs(const std::vector<double> &probabilities);
-double imageEntropy(const std::vector<uchar> &pixels);
+double imageEntropy(const std::vector<uint8_t> &pixels);
 
 // JPEG operations
 cv::Mat shift(const cv::Mat &image);
@@ -37,16 +38,16 @@ cv::Mat transform(const cv::Mat &input);
 cv::Mat transformImage(const cv::Mat &image, int blockSize);
 cv::Mat reverseTransform(const cv::Mat &input);
 cv::Mat reverseTransformImage(const cv::Mat &image, int blockSize);
-cv::Mat tableByQuality(uchar quality);
+cv::Mat tableByQuality(uint8_t quality);
 cv::Mat quantiseBlock(const cv::Mat &input, const cv::Mat &table);
 cv::Mat quantise(const cv::Mat &image, int blockSize, int quality);
 cv::Mat dequantiseBlock(const cv::Mat &input, const cv::Mat &table);
 cv::Mat dequantise(const cv::Mat &quantised, int blockSize, int quality);
 std::vector<std::pair<int, int>> zigzagOrder(int blockSize);
-std::vector<char> zigZagRead(const cv::Mat &coefs, int blockSize);
-cv::Mat zigZagWrite(const std::vector<char> &zigZag, int blockSize, int iw, int ih);
-std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, int blockSize);
-std::pair<std::vector<char>, size_t>
+std::vector<int8_t> zigZagRead(const cv::Mat &coefs, int blockSize);
+cv::Mat zigZagWrite(const std::vector<int8_t> &zigZag, int blockSize, int iw, int ih);
+std::vector<RleElement> runLengthEncoding(const std::vector<int8_t> &sequence, int blockSize);
+std::pair<std::vector<int8_t>, size_t>
 runLengthDecoding(const std::vector<RleElement> &encoded, int blockSize);
 
 
@@ -78,7 +79,7 @@ int main() {
     constexpr double H0{8.};
     // расчёты H, R
     {
-        std::vector<uchar> pixels(source.data, source.data + pxCount);
+        std::vector<uint8_t> pixels(source.data, source.data + pxCount);
         double H = imageEntropy(pixels);
         double R = 1 - H / H0;
         out << "=== SOURCE ===" << std::endl //
@@ -99,12 +100,12 @@ int main() {
                 out << std::endl;
             }
         }
-        const auto shifted = shift(source);                            // signed char
+        const auto shifted = shift(source);                            // signed int8_t
         const auto dctCoefs = transformImage(shifted, blockSize);      // double
-        const auto quantised = quantise(dctCoefs, blockSize, quality); // signed char
+        const auto quantised = quantise(dctCoefs, blockSize, quality); // signed int8_t
         const auto coefsHist = getHist(quantised);
         {
-            std::vector<uchar> pixels(quantised.data, quantised.data + pxCount);
+            std::vector<uint8_t> pixels(quantised.data, quantised.data + pxCount);
             double H = imageEntropy(pixels);
             double R = 1 - H / H0;
             out << "=== QUANTISED DCT (q = " << quality << ") ===" << std::endl //
@@ -115,12 +116,12 @@ int main() {
             auto demo = quantised(demoRect);
             for (int i = 0; i < demo.rows; ++i) {
                 for (int j = 0; j < demo.cols; ++j) {
-                    out << static_cast<int>(demo.at<uchar>(i, j)) << '\t';
+                    out << static_cast<int>(demo.at<int8_t>(i, j)) << '\t';
                 }
                 out << std::endl;
             }
         }
-        std::vector<char> zigZagSource = zigZagRead(quantised, blockSize);
+        std::vector<int8_t> zigZagSource = zigZagRead(quantised, blockSize);
         std::vector<RleElement> rle = runLengthEncoding(zigZagSource, blockSize);
         const auto [zigZagRecovered, bitsNum] = runLengthDecoding(rle, blockSize);
         {
@@ -145,10 +146,11 @@ int main() {
             }
         }
         const auto dctCoefsRecovered =
-                zigZagWrite(zigZagRecovered, blockSize, iw, ih);                     // signed char
-        const auto dequantised = dequantise(dctCoefsRecovered, blockSize, quality);  // double
-        const auto shiftedRecovered = reverseTransformImage(dequantised, blockSize); // signed char
-        const auto recovered = unshift(shiftedRecovered); // unsigned char
+                zigZagWrite(zigZagRecovered, blockSize, iw, ih);                    // signed int8_t
+        const auto dequantised = dequantise(dctCoefsRecovered, blockSize, quality); // double
+        const auto shiftedRecovered =
+                reverseTransformImage(dequantised, blockSize); // signed int8_t
+        const auto recovered = unshift(shiftedRecovered);      // unsigned int8_t
 
         const cv::Mat histRecovered = getHist(recovered);
 
@@ -180,13 +182,13 @@ cv::Mat getHist(const cv::Mat &image) {
     if (image.type() == CV_8U) {
         for (int i = 0; i < image.cols; i++)
             for (int j = 0; j < image.rows; j++) {
-                int r = image.at<unsigned char>(j, i);
+                int r = image.at<uint8_t>(j, i);
                 hist.at<double>(0, r) = hist.at<double>(0, r) + 1.0;
             }
     } else if (image.type() == CV_8S) {
         for (int i = 0; i < image.cols; i++)
             for (int j = 0; j < image.rows; j++) {
-                int r = image.at<char>(j, i) + 128;
+                int r = image.at<int8_t>(j, i) + 128;
                 hist.at<double>(0, r) = hist.at<double>(0, r) + 1.0;
             }
     }
@@ -201,7 +203,7 @@ cv::Mat getHist(const cv::Mat &image) {
     for (int i = 0; i < 256; i++)
         for (int j = 0; j < 100; j++) {
             if (hist.at<double>(0, i) * 100 > j) {
-                hist_img.at<unsigned char>(99 - j, i) = 255;
+                hist_img.at<uint8_t>(99 - j, i) = 255;
             }
         }
     cv::bitwise_not(hist_img, hist_img);
@@ -225,9 +227,9 @@ double entropyByProbs(const std::vector<double> &probabilities) {
     }
     return result;
 }
-double imageEntropy(const std::vector<uchar> &pixels) {
-    std::vector<size_t> histogram(UCHAR_MAX + 1, 0);
-    std::vector<double> probabilities(UCHAR_MAX + 1, 0);
+double imageEntropy(const std::vector<uint8_t> &pixels) {
+    std::vector<size_t> histogram(UINT8_MAX + 1, 0);
+    std::vector<double> probabilities(UINT8_MAX + 1, 0);
     for (auto &pxVal: pixels) {
         histogram[static_cast<size_t>(pxVal)]++;
     }
@@ -243,7 +245,7 @@ cv::Mat shift(const cv::Mat &image) {
     cv::Mat shifted(image.rows, image.cols, CV_8S);
     for (int i = 0; i < image.rows; i++) {
         for (int j = 0; j < image.cols; j++) {
-            shifted.at<char>(i, j) = static_cast<char>(image.at<uchar>(i, j) - 128l);
+            shifted.at<int8_t>(i, j) = static_cast<int8_t>(image.at<uint8_t>(i, j) - 128l);
         }
     }
     return shifted;
@@ -253,7 +255,7 @@ cv::Mat unshift(const cv::Mat &image) {
     cv::Mat unshifted(image.rows, image.cols, CV_8U);
     for (int i = 0; i < image.rows; i++) {
         for (int j = 0; j < image.cols; j++) {
-            unshifted.at<uchar>(i, j) = static_cast<uchar>(image.at<char>(i, j) + 128l);
+            unshifted.at<uint8_t>(i, j) = static_cast<uint8_t>(image.at<int8_t>(i, j) + 128l);
         }
     }
     return unshifted;
@@ -323,7 +325,7 @@ cv::Mat reverseTransformImage(const cv::Mat &image, int blockSize) {
     return transformed;
 }
 
-cv::Mat tableByQuality(uchar quality) {
+cv::Mat tableByQuality(uint8_t quality) {
     assert(quality <= 25);
     assert(quality >= 1);
     cv::Mat result(8, 8, CV_16U);
@@ -343,8 +345,8 @@ cv::Mat quantiseBlock(const cv::Mat &input, const cv::Mat &table) {
     cv::Mat result(input.rows, input.cols, CV_8S);
     for (int i = 0; i < input.rows; i++) {
         for (int j = 0; j < input.cols; j++) {
-            result.at<char>(i, j) =
-                    cv::saturate_cast<char>(input.at<double>(i, j) / table.at<uint16_t>(i, j));
+            result.at<int8_t>(i, j) =
+                    cv::saturate_cast<int8_t>(input.at<double>(i, j) / table.at<uint16_t>(i, j));
         }
     }
     return result;
@@ -375,7 +377,7 @@ cv::Mat dequantiseBlock(const cv::Mat &input, const cv::Mat &table) {
     for (int i = 0; i < input.rows; i++) {
         for (int j = 0; j < input.cols; j++) {
             result.at<double>(i, j) =
-                    static_cast<double>(input.at<char>(i, j)) * table.at<uint16_t>(i, j);
+                    static_cast<double>(input.at<int8_t>(i, j)) * table.at<uint16_t>(i, j);
         }
     }
     return result;
@@ -425,21 +427,21 @@ std::vector<std::pair<int, int>> zigzagOrder(int blockSize) {
 
     return order;
 }
-std::vector<char> zigZagRead(const cv::Mat &coefs, int blockSize) {
+std::vector<int8_t> zigZagRead(const cv::Mat &coefs, int blockSize) {
     assert(coefs.type() == CV_8S);
-    std::vector<char> zigZag(coefs.rows * coefs.cols, 0);
+    std::vector<int8_t> zigZag(coefs.rows * coefs.cols, 0);
     size_t k = 0;
     auto order = zigzagOrder(blockSize);
     for (int i = 0; (i + 1) * blockSize <= coefs.rows; i++) {
         for (int j = 0; (j + 1) * blockSize <= coefs.cols; j++) {
             for (const auto &[di, dj]: order) {
-                zigZag[k++] = coefs.at<char>(i * blockSize + di, j * blockSize + dj);
+                zigZag[k++] = coefs.at<int8_t>(i * blockSize + di, j * blockSize + dj);
             }
         }
     }
     return zigZag;
 }
-cv::Mat zigZagWrite(const std::vector<char> &zigZag, int blockSize, int iw, int ih) {
+cv::Mat zigZagWrite(const std::vector<int8_t> &zigZag, int blockSize, int iw, int ih) {
     assert(zigZag.size() % (blockSize * blockSize) == 0);
     assert(zigZag.size() == iw * ih);
     cv::Mat result(ih, iw, CV_8S);
@@ -448,20 +450,20 @@ cv::Mat zigZagWrite(const std::vector<char> &zigZag, int blockSize, int iw, int 
     for (int i = 0; (i + 1) * blockSize <= ih; i++) {
         for (int j = 0; (j + 1) * blockSize <= iw; j++) {
             for (const auto &[di, dj]: order) {
-                result.at<char>(i * blockSize + di, j * blockSize + dj) = zigZag[k++];
+                result.at<int8_t>(i * blockSize + di, j * blockSize + dj) = zigZag[k++];
             }
         }
     }
     return result;
 }
 
-std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, int blockSize) {
+std::vector<RleElement> runLengthEncoding(const std::vector<int8_t> &sequence, int blockSize) {
     std::vector<RleElement> rleEncoded;
-    char lastDc = 0;
-    uchar counter = 0;
+    int8_t lastDc = 0;
+    uint8_t counter = 0;
     auto blockSize2 = blockSize * blockSize;
     for (size_t i = 0; i < sequence.size(); i++) {
-        uchar blockIdx = i % blockSize2;
+        uint8_t blockIdx = i % blockSize2;
         if (blockIdx == 0) {
             rleEncoded.emplace_back(sequence[i] - lastDc);
             lastDc = sequence[i];
@@ -482,19 +484,19 @@ std::vector<RleElement> runLengthEncoding(const std::vector<char> &sequence, int
     }
     return rleEncoded;
 }
-std::pair<std::vector<char>, size_t>
+std::pair<std::vector<int8_t>, size_t>
 runLengthDecoding(const std::vector<RleElement> &encoded, int blockSize) {
-    std::vector<char> decoded;
+    std::vector<int8_t> decoded;
     size_t bitLength = 0;
     int lastDc = 0;
-    const uchar blockSize2 = blockSize * blockSize;
+    const uint8_t blockSize2 = blockSize * blockSize;
     auto numBlocks = 0;
     bool isDc = true;
     for (const auto &element: encoded) {
         if (isDc) {
             bitLength += 8;
             lastDc = lastDc + element.dc;
-            decoded.push_back(static_cast<char>(lastDc));
+            decoded.push_back(static_cast<int8_t>(lastDc));
             numBlocks++;
             isDc = false;
             continue;
